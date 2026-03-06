@@ -1,0 +1,50 @@
+workflows:
+  ios-build:
+    name: ChatLink iOS Native Build
+    max_build_duration: 60
+    environment:
+      xcode: latest
+
+    scripts:
+      - name: Build folder structure and archive
+        script: |
+          ls -la
+          mkdir -p ChatLinkiOS.xcodeproj
+          mv project.pbxproj ChatLinkiOS.xcodeproj/project.pbxproj
+          mkdir -p ChatLinkiOS/Resources
+          mv AppDelegate.swift    ChatLinkiOS/AppDelegate.swift
+          mv ViewController.swift ChatLinkiOS/ViewController.swift
+          mv Info.plist           ChatLinkiOS/Info.plist
+          mv index.html           ChatLinkiOS/Resources/index.html
+          find . -not -path "./.git/*" -not -path "./build/*" | sort
+          xcodebuild \
+            -project ChatLinkiOS.xcodeproj \
+            -scheme ChatLinkiOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/App.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM="" \
+            IPHONEOS_DEPLOYMENT_TARGET=13.0
+
+      - name: Package IPA
+        script: |
+          APP=$(find build/App.xcarchive -name "*.app" | head -1)
+          mkdir -p build/Payload
+          cp -r "$APP" build/Payload/
+          cd build && zip -r ChatLink.ipa Payload/
+          echo "Done: $(du -sh ChatLink.ipa)"
+
+    artifacts:
+      - build/ChatLink.ipa
+
+    publishing:
+      email:
+        recipients:
+          - ahmad.yns@hotmail.com
+        notify:
+          success: true
+          failure: true
