@@ -8,6 +8,9 @@ workflows:
     scripts:
       - name: Reconstruct Xcode project structure
         script: |
+          echo "=== Files in repo root ==="
+          ls -la
+
           mkdir -p ChatLinkiOS.xcodeproj
           mkdir -p ChatLinkiOS/Resources
 
@@ -18,6 +21,7 @@ workflows:
           mv LaunchScreen.storyboard ChatLinkiOS/Resources/LaunchScreen.storyboard 2>/dev/null || true
           mv index.html          ChatLinkiOS/Resources/index.html  2>/dev/null || true
 
+          echo "=== Structure after reorganise ==="
           find . -not -path './.git/*' | sort
 
       - name: Build iOS archive
@@ -35,34 +39,31 @@ workflows:
             DEVELOPMENT_TEAM="" \
             IPHONEOS_DEPLOYMENT_TARGET=13.0
 
-      - name: Patch MinimumOSVersion to 12.0 in Info.plist AND Mach-O binary
+      - name: Package IPA and patch MinimumOSVersion to 12.0
         script: |
           APP_PATH=$(find build/ChatLink.xcarchive -name "*.app" | head -1)
+          echo "=== App contents ==="
+          ls -la "$APP_PATH"
+          echo "=== App size ==="
+          du -sh "$APP_PATH"
+
+          # Patch Info.plist
+          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 12.0" "$APP_PATH/Info.plist"
+          echo "MinimumOSVersion patched to: $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist")"
+
+          # Patch Mach-O binary
           BINARY="$APP_PATH/ChatLinkiOS"
-          PLIST="$APP_PATH/Info.plist"
+          vtool -set-build-version ios 12.0 12.0 -replace -output "$BINARY" "$BINARY" 2>/dev/null && \
+            echo "vtool binary patched OK" || \
+            echo "vtool patch skipped (may not be needed)"
 
-          echo "=== Patching Info.plist ==="
-          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 12.0" "$PLIST"
-          echo "Info.plist MinimumOSVersion: $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$PLIST")"
-
-          echo "=== Patching Mach-O binary with vtool ==="
-          vtool -set-build-version ios 12.0 12.0 -replace -output "$BINARY" "$BINARY" || \
-          vtool -set-version-min iphoneos 12.0 12.0 -replace -output "$BINARY" "$BINARY" || \
-          echo "vtool not available, trying install_name_tool approach"
-
-          echo "=== Verifying binary min version ==="
-          vtool -show "$BINARY" 2>/dev/null | grep -i "minos\|version\|platform" || \
-          otool -l "$BINARY" | grep -A5 "LC_VERSION_MIN\|LC_BUILD_VERSION" | head -30
-
-      - name: Package IPA
-        script: |
-          APP_PATH=$(find build/ChatLink.xcarchive -name "*.app" | head -1)
           mkdir -p build/Payload
           cp -r "$APP_PATH" build/Payload/
           cd build
           zip -r ChatLink.ipa Payload/
           cd ..
-          echo "IPA ready: $(du -sh build/ChatLink.ipa)"
+          echo "=== Final IPA size ==="
+          du -sh build/ChatLink.ipa
 
     artifacts:
       - build/ChatLink.ipa
