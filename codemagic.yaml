@@ -8,21 +8,45 @@ workflows:
     scripts:
       - name: Reconstruct Xcode project structure
         script: |
-          echo "=== Files in repo root ==="
-          ls -la
+          echo "=== ALL FILES IN REPO ROOT ==="
+          find . -not -path './.git/*' -not -path './build/*' | sort
+          echo "==="
 
           mkdir -p ChatLinkiOS.xcodeproj
           mkdir -p ChatLinkiOS/Resources
 
-          mv project.pbxproj     ChatLinkiOS.xcodeproj/project.pbxproj
-          mv AppDelegate.swift   ChatLinkiOS/AppDelegate.swift     2>/dev/null || true
-          mv ViewController.swift ChatLinkiOS/ViewController.swift 2>/dev/null || true
-          mv Info.plist          ChatLinkiOS/Info.plist            2>/dev/null || true
+          # Move Xcode project files
+          mv project.pbxproj      ChatLinkiOS.xcodeproj/project.pbxproj
+          mv AppDelegate.swift    ChatLinkiOS/AppDelegate.swift      2>/dev/null || true
+          mv ViewController.swift ChatLinkiOS/ViewController.swift   2>/dev/null || true
+          mv Info.plist           ChatLinkiOS/Info.plist             2>/dev/null || true
           mv LaunchScreen.storyboard ChatLinkiOS/Resources/LaunchScreen.storyboard 2>/dev/null || true
-          mv index.html          ChatLinkiOS/Resources/index.html  2>/dev/null || true
 
-          echo "=== Structure after reorganise ==="
-          find . -not -path './.git/*' | sort
+          # Find index.html - it may be at root OR inside www/
+          if [ -f "index.html" ]; then
+            echo "Found index.html at root"
+            mv index.html ChatLinkiOS/Resources/index.html
+          elif [ -f "www/index.html" ]; then
+            echo "Found index.html in www/"
+            mv www/index.html ChatLinkiOS/Resources/index.html
+          elif [ -f "ChatLink.html" ]; then
+            echo "Found ChatLink.html at root"
+            mv ChatLink.html ChatLinkiOS/Resources/index.html
+          else
+            echo "ERROR: No index.html found anywhere!"
+            find . -name "*.html" -not -path './.git/*' | sort
+            exit 1
+          fi
+
+          echo "=== FINAL STRUCTURE ==="
+          find . -not -path './.git/*' -not -path './build/*' | sort
+
+          # VERIFY index.html is in place before building
+          if [ ! -f "ChatLinkiOS/Resources/index.html" ]; then
+            echo "FATAL: ChatLinkiOS/Resources/index.html is missing - build will crash"
+            exit 1
+          fi
+          echo "index.html size: $(du -sh ChatLinkiOS/Resources/index.html)"
 
       - name: Build iOS archive
         script: |
@@ -39,30 +63,39 @@ workflows:
             DEVELOPMENT_TEAM="" \
             IPHONEOS_DEPLOYMENT_TARGET=13.0
 
-      - name: Package IPA and patch MinimumOSVersion to 12.0
+      - name: Patch MinimumOSVersion to 12.0 and package IPA
         script: |
           APP_PATH=$(find build/ChatLink.xcarchive -name "*.app" | head -1)
-          echo "=== App contents ==="
+          echo "=== App bundle contents ==="
           ls -la "$APP_PATH"
-          echo "=== App size ==="
+          echo "=== App bundle size ==="
           du -sh "$APP_PATH"
 
-          # Patch Info.plist
-          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 12.0" "$APP_PATH/Info.plist"
-          echo "MinimumOSVersion patched to: $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist")"
+          # Verify index.html made it into the bundle
+          if [ -f "$APP_PATH/index.html" ]; then
+            echo "index.html in bundle: $(du -sh "$APP_PATH/index.html")"
+          else
+            echo "WARNING: index.html not found directly in bundle, checking..."
+            find "$APP_PATH" -name "*.html" | sort
+          fi
 
-          # Patch Mach-O binary
+          # Patch Info.plist MinimumOSVersion
+          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 12.0" "$APP_PATH/Info.plist"
+          echo "MinimumOSVersion: $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist")"
+
+          # Patch Mach-O binary with vtool
           BINARY="$APP_PATH/ChatLinkiOS"
           vtool -set-build-version ios 12.0 12.0 -replace -output "$BINARY" "$BINARY" 2>/dev/null && \
-            echo "vtool binary patched OK" || \
-            echo "vtool patch skipped (may not be needed)"
+            echo "vtool: binary patched to iOS 12.0" || \
+            echo "vtool: skipped"
 
+          # Package IPA
           mkdir -p build/Payload
           cp -r "$APP_PATH" build/Payload/
           cd build
           zip -r ChatLink.ipa Payload/
           cd ..
-          echo "=== Final IPA size ==="
+          echo "=== FINAL IPA SIZE ==="
           du -sh build/ChatLink.ipa
 
     artifacts:
