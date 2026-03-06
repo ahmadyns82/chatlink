@@ -1,42 +1,62 @@
 workflows:
   ios-build:
-    name: ChatLink iOS Native Build
+    name: ChatLink iOS Build
     max_build_duration: 60
     environment:
-      xcode: latest
+      xcode: 14.3.1
 
     scripts:
-      - name: Build folder structure and archive
+      - name: Reconstruct Xcode project structure
         script: |
+          echo "=== Files in repo root ==="
           ls -la
+
           mkdir -p ChatLinkiOS.xcodeproj
-          mv project.pbxproj ChatLinkiOS.xcodeproj/project.pbxproj
           mkdir -p ChatLinkiOS/Resources
-          mv AppDelegate.swift    ChatLinkiOS/AppDelegate.swift
-          mv ViewController.swift ChatLinkiOS/ViewController.swift
-          mv Info.plist           ChatLinkiOS/Info.plist
-          mv index.html           ChatLinkiOS/Resources/index.html
-          find . -not -path "./.git/*" -not -path "./build/*" | sort
+
+          mv project.pbxproj   ChatLinkiOS.xcodeproj/project.pbxproj
+          mv AppDelegate.swift  ChatLinkiOS/AppDelegate.swift     2>/dev/null || true
+          mv ViewController.swift ChatLinkiOS/ViewController.swift 2>/dev/null || true
+          mv Info.plist         ChatLinkiOS/Info.plist            2>/dev/null || true
+          mv LaunchScreen.storyboard ChatLinkiOS/Resources/LaunchScreen.storyboard 2>/dev/null || true
+          mv index.html         ChatLinkiOS/Resources/index.html  2>/dev/null || true
+
+          echo "=== Structure after reorganise ==="
+          find . -not -path './.git/*' | sort
+
+      - name: Force iOS 12 deployment target
+        script: |
+          sed -i '' \
+            's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 12.0/g' \
+            ChatLinkiOS.xcodeproj/project.pbxproj
+          echo "Deployment targets:"
+          grep "IPHONEOS_DEPLOYMENT_TARGET" ChatLinkiOS.xcodeproj/project.pbxproj
+
+      - name: Build iOS archive
+        script: |
           xcodebuild \
             -project ChatLinkiOS.xcodeproj \
             -scheme ChatLinkiOS \
             -configuration Release \
             -sdk iphoneos \
-            -archivePath build/App.xcarchive \
+            -archivePath build/ChatLink.xcarchive \
             archive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             DEVELOPMENT_TEAM="" \
-            IPHONEOS_DEPLOYMENT_TARGET=13.0
+            IPHONEOS_DEPLOYMENT_TARGET=12.0
 
       - name: Package IPA
         script: |
-          APP=$(find build/App.xcarchive -name "*.app" | head -1)
+          APP_PATH=$(find build/ChatLink.xcarchive -name "*.app" | head -1)
+          echo "App path: $APP_PATH"
           mkdir -p build/Payload
-          cp -r "$APP" build/Payload/
-          cd build && zip -r ChatLink.ipa Payload/
-          echo "Done: $(du -sh ChatLink.ipa)"
+          cp -r "$APP_PATH" build/Payload/
+          cd build
+          zip -r ChatLink.ipa Payload/
+          cd ..
+          echo "IPA ready: $(du -sh build/ChatLink.ipa)"
 
     artifacts:
       - build/ChatLink.ipa
